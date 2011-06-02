@@ -1,0 +1,338 @@
+<?php
+
+/**
+ * @file
+ * isbn2node module
+ */
+
+// Define the url's for fetching ISBN-data and cover files
+define('ISBN2NODE_ISBNDB_URL', 'http://isbndb.com/api/books.xml?access_key=%access_key&results=details&index1=isbn&value1=%isbn_value');
+define('ISBN2NODE_OPENLIBRARY_BOOK_URL', 'http://openlibrary.org/api/books?bibkeys=ISBN:%isbn_value&jscmd=data&format=json');
+define('ISBN2NODE_OPENLIBRARY_COVER_URL', 'http://covers.openlibrary.org/b/isbn/%isbn-%size.jpg');
+
+
+/*
+ * Implements hook_init()
+ */
+function isbn2node_init() {
+  // Load file with private functions
+  module_load_include('inc', 'isbn2node', 'isbn2node.internal');
+}
+
+/*
+  define('ISBN2NODE_COVER_KEY', '70328561f3c931bc0998228f8a6a52ab');
+  http://covers.librarything.com/devkey/70328561f3c931bc0998228f8a6a52ab/medium/isbn/9781878175021
+
+key XGKFHFSI
+
+test ISBN
+9780811701013
+9781599210469
+9781885212139
+9781878175021
+9780811700955
+9780679457619
+9789197508605
+9781571883513
+9781558218048
+9781844831821
+9781873674734
+9780811705271
+1558216081
+9781571881373
+
+9781878175891
+
+*/
+
+/**
+ * Implements hook_perm().
+ */
+function isbn2node_permission() {
+  return array('configure isbn2node' => array(
+      'title' => t('Administer ISBN2node'),
+      'description' => t('Allow user to control settings for fetching book information through ISBNdb or Open Library.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_help().
+ */
+function isbn2node_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#isbn2node' :
+      $output = '<p>Help will follow on:</p>' .
+      '<ul>' .
+      '<li>How to use this module</li>' .
+      '<li>How to work with the ISBN-book content types</li>' .
+      '<li>How to obtain a key for ISBNdb</li>' .
+      '</ul>';
+      return $output;
+      break;
+
+    case 'admin/config/content/isbn2node' :
+      return '<p>' . t('') . '</p>';
+  }
+}
+
+
+/**
+ * Implements hook_menu().
+ */
+function isbn2node_menu() {
+  $items = array();
+
+  // Settings menu.
+  $items['admin/config/content/isbn2node'] = array(
+    'title' => 'ISBN to node',
+    'description' => 'Configure ISBN lookup.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('isbn2node_settings_form'),
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('configure isbn2node'),
+  );
+  
+  // Provide a default menu item, since core does not.
+  $items['node/add/isbn2node_book/isbn2node'] = array(
+    'title' => 'ISBN book by lookup',
+    'description' => 'Enter the ISBN for a book and populate an ISBN-book based on the data fetched.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('isbn2node_add_form'),
+    'type' => MENU_NORMAL_ITEM | MENU_LOCAL_TASK,
+    'access arguments' => array('administer nodes'),
+    'weight' => 10,
+  );
+
+  // Provide a default menu item, since core does not.
+  $items['node/add/isbn2node_book/bulk'] = array(
+    'title' => 'ISBN book bulk import',
+    'description' => 'Enter a series of ISBN and create nodes based on lookups.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('isbn2node_bulk_form'),
+    'type' => MENU_LOCAL_TASK,
+    'access arguments' => array('administer nodes'),
+    'weight' => 20,
+    'file' => 'isbn2node.bulk.inc',
+  );
+
+  return $items;
+}
+
+
+
+/**
+ * Create the settings form.
+ *
+ * This form serves both as the launch form for the debug run
+ * and as the result display when it has run.
+ */
+function isbn2node_settings_form($form, &$form_state) {
+
+  $form = array();
+
+  $form['isbn2node_db'] = array(
+    '#title' => t('Book database to use'),
+    '#type' => 'radios',
+    '#options' => array(
+      'isbndb' => 'ISBNdb',
+      'openlib' => 'Open Libary',
+      ),
+    '#default_value' => variable_get('isbn2node_db', ''),
+    '#required' => TRUE,
+    '#description' => t('If you use ISBNdb you must aquire and enter an access key below'),
+    );
+
+  $form['isbn2node_isbndb_access_key'] = array(
+    '#title' => t('ISBNdb access key'),
+    '#type' => 'textfield',
+    '#default_value' => variable_get('isbn2node_isbndb_access_key', ''),
+    '#description' => t('Your ISBNdb access key. <a href="@url">How to sign up and generate this key</a>.', array('@url' => '/admin/help/isbn2node')),
+  );
+
+  return system_settings_form($form);
+}
+
+/**
+ * Handle submission of the settings form.
+ * 
+ * Will start each cron hook in sequence, log the results
+ * and return to the main form.
+ */
+function isbn2node_settings_form_submit($form, &$form_state) {
+  // Save the values
+  variable_set('isbn2node_db', $form_state['values']['isbn2node_db']);
+  variable_set('isbn2node_isbndb_access_key', $form_state['values']['isbn2node_isbndb_access_key']);  
+  drupal_set_message(t('Your settings have been saved'));
+}
+
+
+
+/*
+ * Present the add single ISBN form
+ */
+function isbn2node_add_form($isbn = '') {
+  $form = array();
+  
+  if (_isbn2node_check_settings($form)) {
+  
+    $form['isbn'] = array(
+      '#title' => t('ISBN'),
+      '#type' => 'textfield',
+      '#required' => TRUE,
+      '#default_value' => $isbn,
+      '#description' => t('Enter the full ISBN for the book.'),
+    );
+    
+    // Buttons
+    $form['buttons']['save'] = array(
+      '#type' => 'submit',
+      '#value' => t('Search'),
+      '#weight' => 140,
+      );
+  
+    $form['buttons']['cancel'] = array(
+      '#markup' => l(t('Cancel'), 'admin/config/content'),
+      '#weight' => 150,
+      );
+  }
+  
+  return $form;
+}
+
+/*
+ * Validate the add single ISBN form
+ */
+function isbn2node_add_form_validate($form) {
+  // Check for an existing book with this ISBN
+  $isbn = _isbn2book_normalize_isbn($form['isbn']['#value']);
+  $result = _isbn2node_isbn_exists($isbn);
+  
+  // Anything? Set a form error
+  if ($result) {
+    form_error($form['isbn'], t('You already have <a href="@view">a book with the ISBN @isbn</a>.<br /><a href="@edit">Edit it here</a>, or <a href="@delete">delete it</a> before adding it again.',
+      array(
+        '@isbn' => $isbn,
+        '@view' => url('node/' . $result['entity_id']),
+        '@edit' => url('node/' . $result['entity_id'] . '/edit'),
+        '@delete' => url('node/' . $result['entity_id'] . '/delete'))));
+  }
+
+  $vals = _isbn2book_fetch_data($isbn);
+
+  if (is_array($vals)) {
+    $success = $vals['success'];
+  }
+  else {
+    $success = $vals->success;
+  }
+
+  if (!$success) {
+    form_error($form['isbn'], t('Didn\'t find any results on the ISBN @isbn', array('@isbn' => $isbn)));
+  }
+}
+
+
+/*
+ * Submit handler for the add single ISBN form
+ * Fetches book data and goes on to the normal node/add form
+ */
+function isbn2node_add_form_submit($form, &$form_state) {
+  // Fetch book data and parse
+  $isbn = _isbn2book_normalize_isbn($form_state['values']['isbn']);
+  $vals = _isbn2book_fetch_data($isbn);
+  $isbn2book_data = _isbn2node_parse($vals, $isbn);
+  // Insert ISBN
+  $isbn2book_data['isbn2node_isbn'] = $isbn;
+
+  // Save data for next step
+  // This ought to be session based to avoid clashes with other user's node submissions
+  variable_set('isbn2node_data', serialize($isbn2book_data));
+  drupal_goto('node/add/isbn2node-book');
+
+}
+
+
+/*
+ * Implements form_alter()
+ */
+function isbn2node_form_alter(&$form, &$form_state, $form_id) {
+
+  switch ($form_id) {
+    // We only intervene on node form for a new node of the right node type
+    case 'isbn2node_book_node_form' :
+
+        // Add custom submit handler to node submit
+      $form['actions']['submit']['#submit'] = array_merge(array('isbn2node_form_submit'), $form['actions']['submit']['#submit']);
+
+      // Don't mess with normal node edits, only adds
+      if (arg(1) == 'add') {
+        // When we have the right circumstances, we will fetch new book data from session or variables table
+        $isbn2book_data = variable_get('isbn2node_data', FALSE);
+  
+        if ($isbn2book_data) {
+  
+          $isbn2book_data = unserialize($isbn2book_data);
+  
+          $image = _isbn2node_fetch_cover($isbn2book_data['isbn2node_isbn']);
+  
+          if ($image) {
+
+            // drupal_set_message(vad($form['isbn2node_cover']));
+  
+            $form['isbn2node_use_img'] = array(
+              '#title' => t('Cover image from OpenLibray'),
+              '#type' => 'fieldset',
+              '#weight' => ($form['isbn2node_cover']['#weight']),
+            );
+
+            $form['isbn2node_use_img']['img'] = array(
+              '#markup' => '<img src="' . $image . '" />',
+            );
+  
+            $form['isbn2node_use_img']['isbn2node_use_img'] = array(
+              '#type' => 'checkbox',
+              '#title' => t('Use this image'),
+              '#default_value' => 1,
+            );
+          }
+          else {
+            drupal_set_message(t('No cover image found for the ISBN @isbn. You can upload one manually.', array('@isbn' => $isbn2book_data['isbn2node_isbn'])));
+          }
+  
+          foreach ($isbn2book_data as $field => $default_value) {
+            switch ($field) {
+              case 'title' :
+                $form[$field]['#default_value'] = $default_value;
+                break;
+              default :
+                $form[$field]['und']['0']['value']['#default_value'] = $default_value;
+                break;
+            }
+          }
+        }
+  
+        // We remove the previously fetched data to avoid clashes with normal node adds
+        variable_del('isbn2node_data');
+  
+        break;
+    }
+  }
+}
+
+
+/*
+ * Submit handler for single ISBN
+ */
+function isbn2node_form_submit(&$form, &$form_state) {
+  // User asked for preloaded cover
+  if (!empty($form_state["input"]["isbn2node_use_img"])) {
+    $file = _isbn2node_save_cover($form_state["values"]["isbn2node_isbn"]['und'][0]['value']);
+
+    // Pump fid into form
+    $form_state['values']["isbn2node_cover"]['und'][0]["fid"] = $file->fid;
+    // Submission continues from here as usual
+  }
+}
+
+
