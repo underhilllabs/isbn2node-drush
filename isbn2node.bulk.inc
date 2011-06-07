@@ -5,6 +5,7 @@
  *
  */
 
+
 /*
  * Present bulk ISBN form
  */
@@ -47,7 +48,7 @@ function isbn2node_bulk_form() {
  * Fetches book data for each ISBN and creates a node for each
  */
 function isbn2node_bulk_form_submit($form, &$form_state) {
-  // Fetch book data and parse
+  // Fetch book data for a list of ISBN's
   
   $isbns = explode("\n", $form_state['values']['isbn_bulk']);
   

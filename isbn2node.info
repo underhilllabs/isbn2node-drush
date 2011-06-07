@@ -4,5 +4,5 @@ core = 7.x
 version = "7.x-1.0"
 dependencies[] = image
 
-configure = admin/config/isbn2node
+configure = admin/config/content/isbn2node
 

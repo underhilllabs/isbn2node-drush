@@ -1,5 +1,4 @@
 <?php
-
 /**
  * @file
  * isbn2node module
@@ -19,31 +18,6 @@ function isbn2node_init() {
   module_load_include('inc', 'isbn2node', 'isbn2node.internal');
 }
 
-/*
-  define('ISBN2NODE_COVER_KEY', '70328561f3c931bc0998228f8a6a52ab');
-  http://covers.librarything.com/devkey/70328561f3c931bc0998228f8a6a52ab/medium/isbn/9781878175021
-
-key XGKFHFSI
-
-test ISBN
-9780811701013
-9781599210469
-9781885212139
-9781878175021
-9780811700955
-9780679457619
-9789197508605
-9781571883513
-9781558218048
-9781844831821
-9781873674734
-9780811705271
-1558216081
-9781571881373
-
-9781878175891
-
-*/
 
 /**
  * Implements hook_perm().
@@ -56,23 +30,28 @@ function isbn2node_permission() {
   );
 }
 
+
 /**
  * Implements hook_help().
  */
 function isbn2node_help($path, $arg) {
   switch ($path) {
     case 'admin/help#isbn2node' :
-      $output = '<p>Help will follow on:</p>' .
-      '<ul>' .
-      '<li>How to use this module</li>' .
-      '<li>How to work with the ISBN-book content types</li>' .
-      '<li>How to obtain a key for ISBNdb</li>' .
-      '</ul>';
+
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('The ISBN2node module will fetch book information based on ISBN\'s') . '</p>';
+      $output .= '<h3>' . t('How to use this module') . '</h3>';
+      $output .= '<p>' . t('This module creates a content type called ISBN-book, which can contain information on a physical book (do not confuse with Drupal\'s existing book format, which is something different.). <br />' .
+                           'You can add book information through a normal node form, but the main purpose of this module is to prepopulate a node form with information on the book based on its ISBN. You enter the ISBN and the module tries to fetch as much information on the book as possible - as well as its cover if available.') . '</p>';
+      $output .= '<h3>' . t('How to obtain a key for ISBNdb') . '</h3>';
+      $output .= '<p>' . t('If you want to use ISBNdb as your lookup database, you will need an access key to their API. Apply for this key on thair web site, and enter the key in the settings for ISBN2node. You do not need a key if you use Open Library as yous ISBN database.') . '</p>';
+
       return $output;
       break;
 
     case 'admin/config/content/isbn2node' :
-      return '<p>' . t('') . '</p>';
+      return '<p>' . t('Configure the ISBN2node module by selecting which ISBN database you want to use and enter an access key if required.') . '</p>';
   }
 }
 
@@ -93,7 +72,7 @@ function isbn2node_menu() {
     'access arguments' => array('configure isbn2node'),
   );
   
-  // Provide a default menu item, since core does not.
+  // PAdd ISBN book via lookup
   $items['node/add/isbn2node_book/isbn2node'] = array(
     'title' => 'ISBN book by lookup',
     'description' => 'Enter the ISBN for a book and populate an ISBN-book based on the data fetched.',
@@ -104,7 +83,7 @@ function isbn2node_menu() {
     'weight' => 10,
   );
 
-  // Provide a default menu item, since core does not.
+  // Bulk add ISBN books
   $items['node/add/isbn2node_book/bulk'] = array(
     'title' => 'ISBN book bulk import',
     'description' => 'Enter a series of ISBN and create nodes based on lookups.',
@@ -116,9 +95,18 @@ function isbn2node_menu() {
     'file' => 'isbn2node.bulk.inc',
   );
 
+  // Add an ISBN book taking the ISBN from the URL
+  $items['node/add/isbn2node_book/manual/%'] = array(
+    'title' => 'ISBN book with ISBN filled out',
+    'description' => 'Go to the form and fill out ISBN from URL.',
+    'page callback' => 'isbn2node_add_manual',
+    'page arguments' => array(4),
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('administer nodes'),
+  );
+
   return $items;
 }
-
 
 
 /**
@@ -153,6 +141,7 @@ function isbn2node_settings_form($form, &$form_state) {
   return system_settings_form($form);
 }
 
+
 /**
  * Handle submission of the settings form.
  * 
@@ -165,7 +154,6 @@ function isbn2node_settings_form_submit($form, &$form_state) {
   variable_set('isbn2node_isbndb_access_key', $form_state['values']['isbn2node_isbndb_access_key']);  
   drupal_set_message(t('Your settings have been saved'));
 }
-
 
 
 /*
@@ -200,6 +188,7 @@ function isbn2node_add_form($isbn = '') {
   return $form;
 }
 
+
 /*
  * Validate the add single ISBN form
  */
@@ -228,7 +217,8 @@ function isbn2node_add_form_validate($form) {
   }
 
   if (!$success) {
-    form_error($form['isbn'], t('Didn\'t find any results on the ISBN @isbn', array('@isbn' => $isbn)));
+    form_error($form['isbn'], t('Didn\'t find any results on the ISBN @isbn. <a href="!url">Create a book manully with this ISBN</a>?',
+                                array('@isbn' => $isbn, '!url' => url('node/add/isbn2node_book/manual/' . $isbn))));
   }
 }
 
@@ -242,6 +232,25 @@ function isbn2node_add_form_submit($form, &$form_state) {
   $isbn = _isbn2book_normalize_isbn($form_state['values']['isbn']);
   $vals = _isbn2book_fetch_data($isbn);
   $isbn2book_data = _isbn2node_parse($vals, $isbn);
+  // Insert ISBN
+  $isbn2book_data['isbn2node_isbn'] = $isbn;
+
+  // Save data for next step
+  // This ought to be session based to avoid clashes with other user's node submissions
+  variable_set('isbn2node_data', serialize($isbn2book_data));
+  drupal_goto('node/add/isbn2node-book');
+
+}
+
+
+/*
+ * Submit handler for the add single ISBN form
+ * Fetches book data and goes on to the normal node/add form
+ */
+function isbn2node_add_manual($isbn) {
+  // Fetch book data and parse
+  $isbn = _isbn2book_normalize_isbn($isbn);
+  $isbn2book_data = array();
   // Insert ISBN
   $isbn2book_data['isbn2node_isbn'] = $isbn;
 

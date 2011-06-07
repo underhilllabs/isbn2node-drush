@@ -1,3 +1,8 @@
 First instance June 2nd 2011
 -----------------------------
 Committed first version of the module
+
+
+June 7th 2011
+-----------------------------
+Added link to manual creation on lookup failure and function to add ISBN to form

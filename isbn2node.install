@@ -7,6 +7,7 @@
  *
  */
 
+
 /**
  * Implements hook_install().
  */
@@ -46,6 +47,7 @@ function isbn2node_install() {
   }
 
 }
+
 
 /*
  * Return an array of supplementary fields needed for isbn2node_book
@@ -109,6 +111,7 @@ function _isbn2node_installed_fields() {
     ),
   );
 }
+
 
 
 /**
@@ -216,7 +219,6 @@ function _isbn2node_installed_instances() {
 
   );
 }
-
 
 
 /**

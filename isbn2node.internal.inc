@@ -4,6 +4,7 @@
  * isbn2node internal functions
  */
 
+
 /*
  * Get book data from external database
  * @param $isbn = ISBN of book
@@ -48,6 +49,7 @@ function _isbn2book_fetch_data($isbn = '') {
 
   return $vals;
 }
+
 
 /*
  * Check that the settings have been set before allowing use of module forms
@@ -106,6 +108,7 @@ function _isbn2node_isbndb_tags($fields = FALSE) {
   }
 }
 
+
 /*
  * Return the fields we want from the Json returned from Open Library
  * and their corresponding Drupal field names
@@ -157,6 +160,7 @@ function _isbn2node_fetch_cover($isbn, $size = 'L') {
   }
 }
 
+
 /*
  * Parse values from book databases
  * @param $vals or object with book data
@@ -183,15 +187,19 @@ function _isbn2node_parse($vals, $isbn) {
                     case 'EDITION_INFO' :
                       // Handle edition/year
                       $parts = explode(';', $v['attributes'][$xml_field]);
-                      $isbn2book_data['isbn2node_year'] = trim($parts[1]); 
+                      if (isset($parts[1])) {
+                        $isbn2book_data['isbn2node_year'] = trim($parts[1]); 
+                      }
                       $v['attributes'][$xml_field] = $parts[0];
                     default :
                       $isbn2book_data[$drupal_field] = $v['attributes'][$xml_field];
                   }
                 }
                 break;
-              default : 
-                $isbn2book_data[$interesting[$v['tag']]] = $v['value'];
+              default :
+                if (isset($v['value'])) {
+                  $isbn2book_data[$interesting[$v['tag']]] = $v['value'];
+                }
                 break;
             }
           }
@@ -282,6 +290,7 @@ function _isbn2node_make_node($fields) {
   
 }
 
+
 /*
  * Get cover file and create file object in database
  * @param $isbn ISBN to look for
@@ -307,6 +316,7 @@ function _isbn2node_save_cover($isbn) {
   
   return $file;
 }
+
 
 /*
  * Check for ISBN already in database
