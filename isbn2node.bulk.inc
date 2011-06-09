@@ -34,7 +34,7 @@ function isbn2node_bulk_form() {
       );
   
     $form['buttons']['cancel'] = array(
-      '#markup' => l(t('Cancel'), 'admin/config/content'),
+      '#markup' => l(t('Cancel'), 'node/add'),
       '#weight' => 150,
       );
   }
@@ -62,7 +62,7 @@ function isbn2node_bulk_form_submit($form, &$form_state) {
       if (!$result) {
         $vals = _isbn2book_fetch_data($isbn);
         if (is_array($vals)) {
-          $succes = $vals['success'];
+          $success = $vals['success'];
         }
         else {
           $success = $vals->success;
@@ -79,13 +79,17 @@ function isbn2node_bulk_form_submit($form, &$form_state) {
             
             // Fetch cover and create file object
             if ($form_state['values']['get_images']) {
-              $file = _isbn2node_save_cover($isbn);
+              if (isset($isbn2book_data['xisbn'])) {
+                $xisbn = $isbn2book_data['xisbn'];
+              }
+              else {
+                $xisbn = '';
+              }
+              $file = _isbn2node_save_cover($isbn, $xisbn);
+              if ($file->fid) {
+                $isbn2book_data['isbn2node_cover'] = $file;
+              }
             }
-            else {
-              $file = new stdClass();
-              $file->fid = 0;
-            }
-            $isbn2book_data['isbn2node_cover'] = $file;
 
             // Create and save the node
             _isbn2node_make_node($isbn2book_data);

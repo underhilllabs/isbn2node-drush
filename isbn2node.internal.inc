@@ -177,6 +177,19 @@ function _isbn2node_parse($vals, $isbn) {
         $interesting = _isbn2node_isbndb_tags();
     
         foreach ($vals as $v) {
+
+          // Get extra ISBN for backup cover check
+          if (is_array($v)) {
+            if (isset($v['attributes']) && is_array($v['attributes'])) {
+              $a = $v['attributes'];
+              if (is_array($a)) {
+                if (isset($a['ISBN'])) {
+                  $isbn2book_data['xisbn'] = $a['ISBN'];
+                }
+              }
+            }
+          }
+
           if (isset($interesting[$v['tag']])) {
             switch ($v['tag']) {
               case 'DETAILS' :
@@ -262,11 +275,12 @@ function _isbn2node_make_node($fields) {
 
   // Remove title
   unset($fields['title']);
-  
+
   // Handle the rest of the fields
   foreach ($fields as $field => $value) {
     if ($field == 'isbn2node_cover') {
-      // Handle special structur for image field
+      $cover = array('fid' => 0);
+      // Handle special structure for image field
       foreach ($value as $k => $v) {
         $cover[$k] = $v;
       }
@@ -296,22 +310,28 @@ function _isbn2node_make_node($fields) {
  * @param $isbn ISBN to look for
  * @return populated file object on succes, empty file object (->fid = 0) on failure
  */
-function _isbn2node_save_cover($isbn) {
+function _isbn2node_save_cover($isbn, $xisbn = '') {
+  // Create empty file object
+  $file = new stdClass();
+  $file->fid = 0;
+
+  // Use backup ISBN if set
+  $isbn = $xisbn ? $xisbn : $isbn;
 
   // Create URL and set filename of local file
   $url = _isbn2node_fetch_cover($isbn);
-  $parts = pathinfo($url);
-  $filename = 'cover_' . $isbn . '.' . $parts['extension'];
+  
+  if ($url) {
+    $parts = pathinfo($url);
+  
+    $filename = 'cover_' . $isbn . '.' . $parts['extension'];
 
-  // Fetch cover file
-  $file_temp = file_get_contents($url);
-  if ($file_temp) {
-    // Create file in database
-    $file = file_save_data($file_temp, 'public://' . $filename, FILE_EXISTS_RENAME);
-  }
-  else {
-    $file = new stdClass();
-    $fild->fid = 0;
+    // Fetch cover file
+    $file_temp = file_get_contents($url);
+    if ($file_temp) {
+      // Create file in database
+      $file = file_save_data($file_temp, 'public://' . $filename, FILE_EXISTS_RENAME);
+    }
   }
   
   return $file;
@@ -329,4 +349,50 @@ function _isbn2node_isbn_exists($isbn) {
     ->condition('isbn2node_isbn_value', $isbn, '=')
     ->execute()
     ->fetchAssoc();
+}
+
+
+/*
+ * Search for title in external database
+ * @param $title = Book title
+ * @return an array of result values
+ */
+function _isbn2book_search_title($title) {
+  // This data ought to be cached locally since ISBNdb only allows a certain number of calls each day
+
+  switch (variable_get('isbn2node_db')) { 
+    case 'isbndb' : 
+      // Form the url
+      $url = str_replace(array('%access_key', '%title_value'),
+        array(variable_get('isbn2node_isbndb_access_key', ''), urlencode($title)),
+        ISBN2NODE_ISBNDB_TITLE_URL);
+
+      // Get and parse the XML
+      $xml = file_get_contents($url);
+      $p = xml_parser_create();
+      xml_parse_into_struct($p, $xml, $vals, $index);
+      $vals['success'] = $vals['1']['attributes']['TOTAL_RESULTS'];
+      xml_parser_free($p);
+    break;
+  
+    case 'openlib' :
+      $url = str_replace('%isbn_value',
+        $isbn,
+        ISBN2NODE_OPENLIBRARY_BOOK_URL);
+
+      // Get and parse the Json
+      $json = file_get_contents($url);
+      // drupal_set_message(vad($json));
+      $vals = json_decode($json);
+      if (count($vals) > 1) {
+        $vals->success = 1;
+      }
+      else {
+        $vals->success = FALSE;
+      }
+
+    break;
+  }
+
+  return $vals;
 }

@@ -1,13 +1,18 @@
-<?php
+    <?php
 /**
  * @file
  * isbn2node module
  */
 
-// Define the url's for fetching ISBN-data and cover files
+// Define the url's for fetching ISBN-data 
 define('ISBN2NODE_ISBNDB_URL', 'http://isbndb.com/api/books.xml?access_key=%access_key&results=details&index1=isbn&value1=%isbn_value');
 define('ISBN2NODE_OPENLIBRARY_BOOK_URL', 'http://openlibrary.org/api/books?bibkeys=ISBN:%isbn_value&jscmd=data&format=json');
+
+// Define the url's for fetching cover files
 define('ISBN2NODE_OPENLIBRARY_COVER_URL', 'http://covers.openlibrary.org/b/isbn/%isbn-%size.jpg');
+
+// Define the url's for searching for titles
+define('ISBN2NODE_ISBNDB_TITLE_URL', 'http://isbndb.com/api/books.xml?access_key=%access_key&results=details&index1=title&value1=%title_value');
 
 
 /*
@@ -95,6 +100,17 @@ function isbn2node_menu() {
     'file' => 'isbn2node.bulk.inc',
   );
 
+  // Title search
+  $items['node/add/isbn2node_book/title'] = array(
+    'title' => 'ISBN title search',
+    'description' => 'Search for books through titles.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('isbn2node_title_form'),
+    'type' => MENU_LOCAL_TASK,
+    'access arguments' => array('administer nodes'),
+    'weight' => 30,
+  );
+
   // Add an ISBN book taking the ISBN from the URL
   $items['node/add/isbn2node_book/manual/%'] = array(
     'title' => 'ISBN book with ISBN filled out',
@@ -180,7 +196,7 @@ function isbn2node_add_form($isbn = '') {
       );
   
     $form['buttons']['cancel'] = array(
-      '#markup' => l(t('Cancel'), 'admin/config/content'),
+      '#markup' => l(t('Cancel'), 'node/add'),
       '#weight' => 150,
       );
   }
@@ -282,8 +298,11 @@ function isbn2node_form_alter(&$form, &$form_state, $form_id) {
         if ($isbn2book_data) {
   
           $isbn2book_data = unserialize($isbn2book_data);
-  
+
           $image = _isbn2node_fetch_cover($isbn2book_data['isbn2node_isbn']);
+          if (!$image && isset($isbn2book_data['xisbn'])) {
+            $image = _isbn2node_fetch_cover($isbn2book_data['xisbn']);
+          }
   
           if ($image) {
 
@@ -304,6 +323,12 @@ function isbn2node_form_alter(&$form, &$form_state, $form_id) {
               '#title' => t('Use this image'),
               '#default_value' => 1,
             );
+
+            $form['isbn2node_use_img']['xisbn'] = array(
+              '#type' => 'hidden',
+              '#value' => $isbn2book_data['xisbn'],
+            );
+
           }
           else {
             drupal_set_message(t('No cover image found for the ISBN @isbn. You can upload one manually.', array('@isbn' => $isbn2book_data['isbn2node_isbn'])));
@@ -336,12 +361,148 @@ function isbn2node_form_alter(&$form, &$form_state, $form_id) {
 function isbn2node_form_submit(&$form, &$form_state) {
   // User asked for preloaded cover
   if (!empty($form_state["input"]["isbn2node_use_img"])) {
-    $file = _isbn2node_save_cover($form_state["values"]["isbn2node_isbn"]['und'][0]['value']);
-
-    // Pump fid into form
-    $form_state['values']["isbn2node_cover"]['und'][0]["fid"] = $file->fid;
+    if (isset($form_state["values"]["xisbn"])) {
+      $xisbn = $form_state["values"]["xisbn"];
+    }
+    else {
+      $xisbn = '';
+    }
+    $file = _isbn2node_save_cover($form_state["values"]["isbn2node_isbn"]['und'][0]['value'], $xisbn);
+    if ($file->fid) {
+      // Pump fid into form
+      $form_state['values']["isbn2node_cover"]['und'][0]["fid"] = $file->fid;
+    }
     // Submission continues from here as usual
   }
 }
 
+/*
+ * Implements hook_submit
+ */
+function isbn2node_node_submit($node) {
+  // Remove trailing commas from author field before submission
+  $node->isbn2node_author['und']['0']['value'] = rtrim(trim($node->isbn2node_author['und']['0']['value']), ',');
+  return $node;
+}
+
+/*
+ * Form for title search
+ * Two steps
+ * 1: title field
+ * 2: select single title to fetch
+ */
+function isbn2node_title_form($form, &$form_state) {
+  $form = array();
+  
+  if (empty($form_state['storage']['titles'])) {
+    if (_isbn2node_check_settings($form)) {
+  
+      $form['title'] = array(
+        '#title' => t('Book title'),
+        '#type' => 'textfield',
+        '#required' => TRUE,
+        '#default_value' => '',
+        '#required' => TRUE,
+        '#description' => t('Enter a title to search for.'),
+      );
+      
+      $submit = t('Search');
+      $form['buttons']['cancel'] = array(
+        '#markup' => l(t('Cancel'), 'node/add'),
+        '#weight' => 150,
+        );
+    }
+  }
+  else {
+    $options = array();
+    // Display a message with the submitted value.
+    foreach($form_state['storage']['titles'] as $title) {
+      
+      $img = _isbn2node_fetch_cover($title['isbn'], 'S');
+      
+      $options[$title['isbn']] = $title['title'] . ' - <em>' . $title['author'] . '</em> - ISBN: ' . $title['isbn'] . '/' . $title['isbn13'] . ($img ? '<br />' . theme('image', array('path' => $img)) . '<br />' : '');
+    }
+  
+    $form['isbn'] = array(
+      '#type' => 'radios',
+      '#options' => $options,
+      '#required' => TRUE,
+    );
+    
+    $submit = t('Fetch');
+    $form['buttons']['cancel'] = array(
+      '#markup' => l(t('Cancel'), 'node/add/isbn2node_book/title'),
+      '#weight' => 150,
+      );
+  }
+
+  // Buttons
+  $form['buttons']['save'] = array(
+    '#type' => 'submit',
+    '#value' => $submit,
+    '#weight' => 140,
+    );    
+  
+  return $form;
+}
+
+
+/*
+ * Submnit handler for title search
+ */
+function isbn2node_title_form_submit(&$form, &$form_state) {
+  
+  if (isset($form_state['values']['isbn'])) {
+    // Submit as on manual ISBN search
+    isbn2node_add_form_submit($form, $form_state);
+  }
+  else {
+    // Look for title
+    $title = trim($form_state['values']['title']);
+    
+    $vals = _isbn2book_search_title($title);
+    $i = 1;
+    $res = array();
+  
+    if ($vals[1]['attributes']['TOTAL_RESULTS'] > 0) {
+  
+      if ($vals[1]['attributes']['TOTAL_RESULTS'] > 10) {
+        drupal_set_message(t('Found @num titles. You may want to narrow down your search', array('@num' => $vals[1]['attributes']['TOTAL_RESULTS'])), 'warning');
+      }
+  
+      foreach ($vals as $ix => $val) {
+        switch ($val['tag']) {
+          case 'TITLE' :
+            if (isset($val['value'])) {
+              $res[$i]['title'] = $val['value'];
+            }
+            break;
+          
+          case 'AUTHORSTEXT' :
+            if (isset($val['value'])) {
+              $res[$i]['author'] = $val['value'];
+              $i++;
+            }
+            break;
+  
+          case 'BOOKDATA' :
+            if (isset($val['attributes']['ISBN'])) {
+              $res[$i]['isbn'] = $val['attributes']['ISBN'];
+            }
+            if (isset($val['attributes']['ISBN13'])) {
+              $res[$i]['isbn13'] = $val['attributes']['ISBN13'];
+            }
+          // drupal_set_message($ix . vad($val));
+        }
+      }
+    }
+    else {
+      drupal_set_message(t('No titles found matching @title', array('@title' => $title)), 'warning');
+    }
+  
+    // Tell FAPI to rebuild.
+    $form_state['rebuild'] = TRUE;  
+    $form_state['storage']['titles'] = $res;
+    }
+}
 

@@ -2,9 +2,6 @@
 /**
  * @file
  * Install and uninstall functions for the ISBN2node module.
- *
- * some help here http://www.espend.de/artikel/drupal-7-field-api-setup-new-content-type-install-and-add-fields.html
- *
  */
 
 

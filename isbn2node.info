@@ -1,8 +1,15 @@
 name = ISBN2Node
 description = Fetch book info based on ISBN
 core = 7.x
-version = "7.x-1.0"
+version = "7.x-1.1"
 dependencies[] = image
 
 configure = admin/config/content/isbn2node
+
+
+; Information added by drupal.org packaging script on 2011-06-07
+version = "7.x-1.1"
+core = "7.x"
+project = "ISBN2node"
+datestamp = "1307458615"
 
