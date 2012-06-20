@@ -46,12 +46,13 @@ function isbn2node_import($file, $get_images=TRUE) {
    // $fh = open($file);
    // foreach($line as readline($fh)) {
    //   preg_match($isbn_match, $line);
-   $handle = fopen($file, "r");
-   while($isbn = fgets($handle)) {
-     // Fetch book data
-     drush_print("trying ISBN: " + $isbn);
-     $isbn = _isbn2book_normalize_isbn($isbn);
-     if ($isbn) {
+  $pwd = getenv("PWD") . "/";
+  $handle = fopen($pwd . $file, "r");
+  while($isbn = fgets($handle)) {
+    // Fetch book data
+    drush_print("trying ISBN: " + $isbn);
+    $isbn = _isbn2book_normalize_isbn($isbn);
+    if ($isbn) {
        // Check if ISBN is already in site database.
        $result = _isbn2node_isbn_exists($isbn);
 
