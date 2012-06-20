@@ -37,7 +37,7 @@ function _isbn2book_fetch_data($isbn = '') {
       $json = file_get_contents($url);
       // drupal_set_message(vad($json));
       $vals = json_decode($json);
-      if (count($vals) > 1) {
+      if (count($vals) > 0) {
         $vals->success = 1;
       }
       else {

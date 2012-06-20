@@ -324,10 +324,12 @@ function isbn2node_form_alter(&$form, &$form_state, $form_id) {
               '#default_value' => 1,
             );
 
-            $form['isbn2node_use_img']['xisbn'] = array(
-              '#type' => 'hidden',
-              '#value' => $isbn2book_data['xisbn'],
-            );
+            if (isset($isbn2book_data['xisbn'])) {
+              $form['isbn2node_use_img']['xisbn'] = array(
+                '#type' => 'hidden',
+                '#value' => $isbn2book_data['xisbn'],
+              );
+            }
 
           }
           else {
