@@ -17,11 +17,13 @@ function isbn2node_drush_command() {
     'description' => dt('Import the ISBNs from a file.'),
     'aliases' => array('i2i'),
     'examples' => array(
-      'drush isbn2node-import file' => 'Import ISBNs in file.',
-      'drush isbn2node-import file FALSE' => 'Import ISBNs from file, but do not retrieve book covers.',
+      'drush isbn2node-import file' => 'Import ISBNs from file.',
+      'drush isbn2node-import file uid' => 'Import ISBNs from file and make user uid the owner of the nodes.',
+      'drush isbn2node-import file FALSE' => 'Import ISBNs from file but do not retrieve the book covers.',
     ),
     'arguments' => array(
       'file'            => "The file to parse for ISBNs. The file is required to have one ISBN per line.",
+      'uid'             => "Optional. The uid of the user to set as content owner.",
       'get_images'      => "Optional. Boolean: whether to retrieve book-covers as well.",
     ),
   );
@@ -42,15 +44,12 @@ function isbn2node_drush_help($section) {
 /**
  * Import the ISBNs in the file.
  */
-function isbn2node_import($file, $get_images=TRUE) {
-   // $fh = open($file);
-   // foreach($line as readline($fh)) {
-   //   preg_match($isbn_match, $line);
+function isbn2node_import($file, $uid='', $get_images=TRUE) {
   $pwd = getenv("PWD") . "/";
   $handle = fopen($pwd . $file, "r");
   while($isbn = fgets($handle)) {
     // Fetch book data
-    drush_print("trying ISBN: " + $isbn);
+    drush_print("trying ISBN: " . $isbn);
     $isbn = _isbn2book_normalize_isbn($isbn);
     if ($isbn) {
        // Check if ISBN is already in site database.
@@ -75,7 +74,6 @@ function isbn2node_import($file, $get_images=TRUE) {
              $isbn2book_data['isbn2node_isbn'] = $isbn;
 
              // Fetch cover and create file object
-             // @TODO
              if ($get_images == TRUE) {
                if (isset($isbn2book_data['xisbn'])) {
                  $xisbn = $isbn2book_data['xisbn'];
@@ -90,7 +88,8 @@ function isbn2node_import($file, $get_images=TRUE) {
              }
 
              // Create and save the node
-             _isbn2node_make_node($isbn2book_data);
+             //   had to copy this to allow adding a node owner of $uid
+             _isbn2node_drush_make_node($isbn2book_data, $uid);
            }
          }
        } // if (!$result)
@@ -101,3 +100,53 @@ function isbn2node_import($file, $get_images=TRUE) {
    }
 }
 
+
+/*
+ * Make and save a node based on a fields array
+ * @param $fields array of node fields for isbn2node_book content type
+ * @param $uid the user id of the content owner
+ */
+function _isbn2node_drush_make_node($fields, $uid) {
+  $node = new stdClass();
+  $node->title = $fields['title'];
+  $node->type = 'isbn2node_book';
+  $node->created = time();
+  $node->changed= time();
+  $node->status = 1;
+  $node->promote = 1;
+  $node->sticky = 0;
+  $node->uid = $uid;
+  $node->language = 'en';
+  $node->timestamp = time();
+  $node->revision = 0;
+
+  // Remove title
+  unset($fields['title']);
+
+  // Handle the rest of the fields
+  foreach ($fields as $field => $value) {
+    if ($field == 'isbn2node_cover') {
+      $cover = array('fid' => 0);
+      // Handle special structure for image field
+      foreach ($value as $k => $v) {
+        $cover[$k] = $v;
+      }
+    $node->$field = array('und' => array(0 => $cover));
+    }
+    else {
+      // Transfer normal field
+      $node->$field = array('und' => array(0 => array('value' => $value)));
+    }
+  }
+
+  node_submit($node);
+  node_save($node);
+
+  if (isset($node->nid)) {
+    drupal_set_message(t('Created !title from ISBN @isbn.', array('!title' => l($node->title, 'node/' . $node->nid), '@isbn' => $fields['isbn2node_isbn'])));
+  }
+  else {
+    drupal_set_message(t('Failed creating book from ISBN @isbn.', array('@isbn' => $fields['isbn2node_isbn'])));
+  }
+
+}
